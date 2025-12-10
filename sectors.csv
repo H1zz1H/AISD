@@ -1,0 +1,3 @@
+x,y,radius,start_angle,end_angle,color
+100,100,50,0,90
+200,150,40,45,135
