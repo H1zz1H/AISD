@@ -1,0 +1,192 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox, colorchooser
+import math
+import csv
+import os
+
+class CircularSector:
+    def __init__(self, x, y, radius, start_angle, end_angle, color="black"):
+        self.x = x
+        self.y = y
+        self.radius = radius
+        self.start_angle = start_angle % 360
+        self.end_angle = end_angle % 360
+        self.color = color
+
+    def get_arc_points(self, num_points=20):
+        """Возвращает список точек дуги."""
+        if self.start_angle <= self.end_angle:
+            angles = [self.start_angle + (self.end_angle - self.start_angle) * i / (num_points - 1)
+                      for i in range(num_points)]
+        else:
+            angles = [self.start_angle + (360 - self.start_angle + self.end_angle) * i / (num_points - 1)
+                      for i in range(num_points)]
+            angles = [a % 360 for a in angles]
+        points = []
+        for a in angles:
+            rad = math.radians(a)
+            points.append((self.x + self.radius * math.cos(rad),
+                           self.y - self.radius * math.sin(rad)))  # y инвертируется для Canvas
+        return points
+
+    def get_bounding_box(self):
+        """Возвращает ограничивающий прямоугольник (min_x, min_y, max_x, max_y)."""
+        points = self.get_arc_points()
+        points.append((self.x, self.y))  # центр тоже учитываем
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    def check_intersection(self, other):
+        """Проверяет пересечение по ограничивающим прямоугольникам."""
+        a_minx, a_miny, a_maxx, a_maxy = self.get_bounding_box()
+        b_minx, b_miny, b_maxx, b_maxy = other.get_bounding_box()
+        return not (a_maxx < b_minx or a_minx > b_maxx or a_maxy < b_miny or a_miny > b_maxy)
+
+    def rotate(self, pivot_point, angle_deg):
+        """Поворачивает сектор вокруг pivot_point на angle_deg градусов."""
+        angle_rad = math.radians(angle_deg)
+        cos_a = math.cos(angle_rad)
+        sin_a = math.sin(angle_rad)
+
+        def rotate_point(px, py):
+            # Перенос в начало координат относительно pivot
+            dx = px - pivot_point[0]
+            dy = py - pivot_point[1]
+            # Поворот
+            new_x = dx * cos_a - dy * sin_a + pivot_point[0]
+            new_y = dx * sin_a + dy * cos_a + pivot_point[1]
+            return new_x, new_y
+
+        # Поворачиваем центр
+        self.x, self.y = rotate_point(self.x, self.y)
+        # Обновляем углы (поворачиваем дугу)
+        self.start_angle = (self.start_angle + angle_deg) % 360
+        self.end_angle = (self.end_angle + angle_deg) % 360
+
+    def draw(self, canvas):
+        """Рисует сектор на canvas как многоугольник."""
+        arc_points = self.get_arc_points()
+        points = [(self.x, self.y)] + arc_points
+        flat_points = [coord for pt in points for coord in pt]
+        canvas.create_polygon(flat_points, fill=self.color, outline="black", width=1)
+
+    def to_csv_string(self):
+        return f"{self.x},{self.y},{self.radius},{self.start_angle},{self.end_angle},{self.color}"
+
+# ---------- GUI ----------
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Сектора круга — ИСТбд-13, Вариант 3")
+        self.sectors = []
+
+        # Кнопки
+        btn_frame = tk.Frame(root)
+        btn_frame.pack(pady=5)
+
+        tk.Button(btn_frame, text="Загрузить из CSV", command=self.load_csv).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Сохранить в CSV", command=self.save_csv).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Проверить пересечения", command=self.check_intersections).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Поворот последнего сектора", command=self.rotate_last).pack(side=tk.LEFT, padx=5)
+        tk.Button(btn_frame, text="Выбрать цвет для нового", command=self.choose_color).pack(side=tk.LEFT, padx=5)
+
+        # Canvas
+        self.canvas = tk.Canvas(root, width=600, height=400, bg="white")
+        self.canvas.pack(pady=10)
+
+        self.current_color = "red"
+
+        # Статус
+        self.status = tk.Label(root, text="Готово", bd=1, relief=tk.SUNKEN, anchor=tk.W)
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def choose_color(self):
+        color = colorchooser.askcolor(title="Выберите цвет для новых секторов")
+        if color[1]:
+            self.current_color = color[1]
+            self.status.config(text=f"Цвет установлен: {self.current_color}")
+
+    def load_csv(self):
+        filename = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
+        if not filename:
+            return
+        self.sectors.clear()
+        self.canvas.delete("all")
+        try:
+            with open(filename, newline='', encoding='utf-8') as f:
+                reader = csv.reader(f)
+                header = next(reader)
+                for row in reader:
+                    if len(row) != 6:
+                        raise ValueError("Неверное количество полей")
+                    x = float(row[0])
+                    y = float(row[1])
+                    radius = float(row[2])
+                    sa = float(row[3])
+                    ea = float(row[4])
+                    color = row[5]
+                    if radius <= 0:
+                        raise ValueError("Радиус должен быть > 0")
+                    sector = CircularSector(x, y, radius, sa, ea, color)
+                    self.sectors.append(sector)
+            self.redraw()
+            self.status.config(text=f"Загружено {len(self.sectors)} секторов из {os.path.basename(filename)}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Неверный формат файла:\n{e}")
+
+    def save_csv(self):
+        if not self.sectors:
+            messagebox.showwarning("Предупреждение", "Нет данных для сохранения")
+            return
+        filename = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+        if not filename:
+            return
+        try:
+            with open(filename, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["x", "y", "radius", "start_angle", "end_angle", "color"])
+                for s in self.sectors:
+                    writer.writerow([s.x, s.y, s.radius, s.start_angle, s.end_angle, s.color])
+            self.status.config(text=f"Сохранено в {os.path.basename(filename)}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}")
+
+    def check_intersections(self):
+        if len(self.sectors) < 2:
+            messagebox.showinfo("Результат", "Недостаточно секторов для проверки")
+            return
+        pairs = []
+        for i in range(len(self.sectors)):
+            for j in range(i + 1, len(self.sectors)):
+                if self.sectors[i].check_intersection(self.sectors[j]):
+                    pairs.append((i + 1, j + 1))
+        if pairs:
+            msg = "Пересекающиеся пары секторов:\n" + "\n".join([f"{a} и {b}" for a, b in pairs])
+        else:
+            msg = "Пересечений не обнаружено."
+        messagebox.showinfo("Проверка пересечений", msg)
+
+    def rotate_last(self):
+        if not self.sectors:
+            messagebox.showwarning("Ошибка", "Нет секторов")
+            return
+        sector = self.sectors[-1]
+        arc_points = sector.get_arc_points()
+        if not arc_points:
+            return
+        pivot = arc_points[0]  # первая точка дуги
+        sector.rotate(pivot, 30)  # поворот на 30 градусов
+        self.redraw()
+        self.status.config(text="Последний сектор повёрнут на 30° вокруг первой точки дуги")
+
+    def redraw(self):
+        self.canvas.delete("all")
+        for s in self.sectors:
+            s.draw(self.canvas)
+
+# ---------- Запуск ----------
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = App(root)
+    root.mainloop()
