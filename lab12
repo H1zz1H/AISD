@@ -1,0 +1,189 @@
+from tkinter import *
+from tkinter.messagebox import showinfo
+import random
+
+
+class Battleship:
+    def __init__(self, master):
+        self.master = master
+        self.master.title('Морской бой')
+        self.master.config(bg="#737373")
+
+        self.title = Label(master, text="Морской бой", font=("Arial", 40))
+        self.start_btn = Button(master, text="Играть", font=("Arial", 20), command=self.start_game)
+        self.exit_btn = Button(master, text="Выход", font=("Arial", 20), command=master.destroy)
+
+        self.title.pack(pady=50)
+        self.start_btn.pack(pady=10)
+        self.exit_btn.pack(pady=10)
+
+        self.ships = [4, 3, 3, 2, 2, 2, 1, 1, 1, 1]
+        self.player_board = [['' for _ in range(10)] for _ in range(10)]
+        self.ai_board = [['' for _ in range(10)] for _ in range(10)]
+        self.player_buttons = [[None for _ in range(10)] for _ in range(10)]
+        self.ai_buttons = [[None for _ in range(10)] for _ in range(10)]
+        self.player_ships = []
+        self.ai_ships = []
+
+    def start_game(self):
+        self.title.pack_forget()
+        self.start_btn.pack_forget()
+        self.exit_btn.pack_forget()
+        self.create_boards()
+
+    def create_boards(self):
+        main_frame = Frame(self.master)
+        main_frame.pack(pady=20)
+
+        Label(main_frame, text="Ваше поле", font=("Arial", 16)).grid(row=0, column=0)
+        player_frame = Frame(main_frame)
+        player_frame.grid(row=1, column=0, padx=20)
+
+        Label(main_frame, text="Поле компьютера", font=("Arial", 16)).grid(row=0, column=1)
+        ai_frame = Frame(main_frame)
+        ai_frame.grid(row=1, column=1, padx=20)
+
+        for i in range(10):
+            for j in range(10):
+                btn = Button(player_frame, text="", width=3, height=1, bg="lightblue", state=DISABLED)
+                btn.grid(row=i, column=j, padx=1, pady=1)
+                self.player_buttons[i][j] = btn
+
+                btn = Button(ai_frame, text="", width=3, height=1, bg="lightblue",
+                             command=lambda x=i, y=j: self.attack(x, y))
+                btn.grid(row=i, column=j, padx=1, pady=1)
+                self.ai_buttons[i][j] = btn
+
+        self.back_btn = Button(self.master, text="Назад", font=("Arial", 16), command=self.back_to_menu)
+        self.back_btn.pack(pady=10)
+        self.status = Label(self.master, text="Ваш ход! Атакуйте поле компьютера", font=("Arial", 14))
+        self.status.pack(pady=5)
+
+        self.place_ships()
+
+    def place_ships(self):
+        self.player_ships = []
+        self.ai_ships = []
+
+        for board, buttons, ships in [
+            (self.player_board, self.player_buttons, self.player_ships),
+            (self.ai_board, None, self.ai_ships)
+        ]:
+            for ship_size in self.ships:
+                placed = False
+                attempts = 0
+                while not placed and attempts < 100:
+                    row, col = random.randint(0, 9), random.randint(0, 9)
+                    orientation = random.choice(['h', 'v'])
+
+                    if self.can_place_ship(board, row, col, ship_size, orientation):
+                        ship_coords = []
+                        for i in range(ship_size):
+                            r, c = (row, col + i) if orientation == 'h' else (row + i, col)
+                            board[r][c] = 'S'
+                            ship_coords.append((r, c))
+                            if buttons:
+                                buttons[r][c].config(bg="darkblue")
+                        ships.append(ship_coords)
+                        placed = True
+                    attempts += 1
+
+    def can_place_ship(self, board, row, col, size, orientation):
+        if orientation == 'h' and col + size > 10: return False
+        if orientation == 'v' and row + size > 10: return False
+
+        for i in range(size):
+            r, c = (row, col + i) if orientation == 'h' else (row + i, col)
+            if board[r][c] != '': return False
+
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < 10 and 0 <= nc < 10 and board[nr][nc] == 'S':
+                        return False
+        return True
+
+    def mark_around_sunken_ship(self, board, buttons, ship_coords):
+        """Помечает клетки вокруг потопленного корабля"""
+        for r, c in ship_coords:
+            for dr in [-1, 0, 1]:
+                for dc in [-1, 0, 1]:
+                    nr, nc = r + dr, c + dc
+                    if 0 <= nr < 10 and 0 <= nc < 10 and board[nr][nc] == '':
+                        board[nr][nc] = 'O'
+                        if buttons:
+                            buttons[nr][nc].config(text="•", bg="gray", state=DISABLED)
+
+    def attack(self, x, y):
+        if self.ai_board[x][y] in ['X', 'O']: return
+
+        if self.ai_board[x][y] == 'S':
+            self.ai_board[x][y] = 'X'
+            self.ai_buttons[x][y].config(text="X", bg="red", state=DISABLED)
+
+            # Проверяем, потоплен ли корабль
+            for ship in self.ai_ships:
+                if (x, y) in ship:
+                    if all(self.ai_board[r][c] == 'X' for r, c in ship):
+                        # Корабль потоплен - помечаем клетки вокруг
+                        self.mark_around_sunken_ship(self.ai_board, self.ai_buttons, ship)
+
+            if self.check_win(self.ai_board):
+                showinfo("Победа!", "Вы победили!")
+                self.back_to_menu()
+                return
+
+            self.status.config(text="Попадание! Ваш ход продолжается")
+        else:
+            self.ai_board[x][y] = 'O'
+            self.ai_buttons[x][y].config(text="•", bg="gray", state=DISABLED)
+            self.status.config(text="Промах! Ход компьютера")
+            self.master.after(1000, self.ai_turn)
+
+    def ai_turn(self):
+        empty_cells = [(i, j) for i in range(10) for j in range(10)
+                       if self.player_board[i][j] not in ['X', 'O']]
+        if not empty_cells: return
+
+        x, y = random.choice(empty_cells)
+        if self.player_board[x][y] == 'S':
+            self.player_board[x][y] = 'X'
+            self.player_buttons[x][y].config(text="X", bg="red")
+
+            # Проверяем, потоплен ли корабль
+            for ship in self.player_ships:
+                if (x, y) in ship:
+                    if all(self.player_board[r][c] == 'X' for r, c in ship):
+                        # Корабль потоплен - помечаем клетки вокруг
+                        self.mark_around_sunken_ship(self.player_board, self.player_buttons, ship)
+
+            if self.check_win(self.player_board):
+                showinfo("Поражение!", "Компьютер победил!")
+                self.back_to_menu()
+                return
+
+            self.status.config(text="Компьютер попал! Его ход продолжается")
+            self.master.after(1000, self.ai_turn)
+        else:
+            self.player_board[x][y] = 'O'
+            self.player_buttons[x][y].config(text="•", bg="gray")
+            self.status.config(text="Компьютер промахнулся! Ваш ход")
+
+    def check_win(self, board):
+        return all(cell != 'S' for row in board for cell in row)
+
+    def back_to_menu(self):
+        for widget in self.master.winfo_children():
+            widget.pack_forget()
+
+        self.__init__(self.master)
+        self.title.pack(pady=50)
+        self.start_btn.pack(pady=10)
+        self.exit_btn.pack(pady=10)
+
+
+if __name__ == "__main__":
+    root = Tk()
+    root.geometry('800x600')
+    Battleship(root)
+    root.mainloop()
