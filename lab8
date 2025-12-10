@@ -1,17 +1,16 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, colorchooser
+from tkinter import filedialog, messagebox
 import math
 import csv
 import os
 
 class CircularSector:
-    def __init__(self, x, y, radius, start_angle, end_angle, color="black"):
+    def __init__(self, x, y, radius, start_angle, end_angle):
         self.x = x
         self.y = y
         self.radius = radius
         self.start_angle = start_angle % 360
         self.end_angle = end_angle % 360
-        self.color = color
 
     def get_arc_points(self, num_points=20):
         """Возвращает список точек дуги."""
@@ -32,7 +31,7 @@ class CircularSector:
     def get_bounding_box(self):
         """Возвращает ограничивающий прямоугольник (min_x, min_y, max_x, max_y)."""
         points = self.get_arc_points()
-        points.append((self.x, self.y))  # центр тоже учитываем
+        points.append((self.x, self.y))
         xs = [p[0] for p in points]
         ys = [p[1] for p in points]
         return min(xs), min(ys), max(xs), max(ys)
@@ -50,35 +49,31 @@ class CircularSector:
         sin_a = math.sin(angle_rad)
 
         def rotate_point(px, py):
-            # Перенос в начало координат относительно pivot
             dx = px - pivot_point[0]
             dy = py - pivot_point[1]
-            # Поворот
             new_x = dx * cos_a - dy * sin_a + pivot_point[0]
             new_y = dx * sin_a + dy * cos_a + pivot_point[1]
             return new_x, new_y
 
-        # Поворачиваем центр
         self.x, self.y = rotate_point(self.x, self.y)
-        # Обновляем углы (поворачиваем дугу)
         self.start_angle = (self.start_angle + angle_deg) % 360
         self.end_angle = (self.end_angle + angle_deg) % 360
 
     def draw(self, canvas):
-        """Рисует сектор на canvas как многоугольник."""
+        """Рисует сектор на canvas как многоугольник (цвет фиксированный)."""
         arc_points = self.get_arc_points()
         points = [(self.x, self.y)] + arc_points
         flat_points = [coord for pt in points for coord in pt]
-        canvas.create_polygon(flat_points, fill=self.color, outline="black", width=1)
+        canvas.create_polygon(flat_points, fill="lightblue", outline="black", width=1)
 
-    def to_csv_string(self):
-        return f"{self.x},{self.y},{self.radius},{self.start_angle},{self.end_angle},{self.color}"
+    def to_csv_row(self):
+        return [self.x, self.y, self.radius, self.start_angle, self.end_angle]
 
 # ---------- GUI ----------
 class App:
     def __init__(self, root):
         self.root = root
-        self.root.title("Сектора круга — ИСТбд-13, Вариант 3")
+        self.root.title("Сектора круга")
         self.sectors = []
 
         # Кнопки
@@ -89,23 +84,14 @@ class App:
         tk.Button(btn_frame, text="Сохранить в CSV", command=self.save_csv).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Проверить пересечения", command=self.check_intersections).pack(side=tk.LEFT, padx=5)
         tk.Button(btn_frame, text="Поворот последнего сектора", command=self.rotate_last).pack(side=tk.LEFT, padx=5)
-        tk.Button(btn_frame, text="Выбрать цвет для нового", command=self.choose_color).pack(side=tk.LEFT, padx=5)
 
         # Canvas
         self.canvas = tk.Canvas(root, width=600, height=400, bg="white")
         self.canvas.pack(pady=10)
 
-        self.current_color = "red"
-
         # Статус
         self.status = tk.Label(root, text="Готово", bd=1, relief=tk.SUNKEN, anchor=tk.W)
         self.status.pack(side=tk.BOTTOM, fill=tk.X)
-
-    def choose_color(self):
-        color = colorchooser.askcolor(title="Выберите цвет для новых секторов")
-        if color[1]:
-            self.current_color = color[1]
-            self.status.config(text=f"Цвет установлен: {self.current_color}")
 
     def load_csv(self):
         filename = filedialog.askopenfilename(filetypes=[("CSV files", "*.csv")])
@@ -116,19 +102,18 @@ class App:
         try:
             with open(filename, newline='', encoding='utf-8') as f:
                 reader = csv.reader(f)
-                header = next(reader)
+                header = next(reader)  # пропускаем заголовок
                 for row in reader:
-                    if len(row) != 6:
-                        raise ValueError("Неверное количество полей")
+                    if len(row) != 5:
+                        raise ValueError("Неверное количество полей (ожидается: x,y,radius,start_angle,end_angle)")
                     x = float(row[0])
                     y = float(row[1])
                     radius = float(row[2])
                     sa = float(row[3])
                     ea = float(row[4])
-                    color = row[5]
                     if radius <= 0:
                         raise ValueError("Радиус должен быть > 0")
-                    sector = CircularSector(x, y, radius, sa, ea, color)
+                    sector = CircularSector(x, y, radius, sa, ea)
                     self.sectors.append(sector)
             self.redraw()
             self.status.config(text=f"Загружено {len(self.sectors)} секторов из {os.path.basename(filename)}")
@@ -145,9 +130,9 @@ class App:
         try:
             with open(filename, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(["x", "y", "radius", "start_angle", "end_angle", "color"])
+                writer.writerow(["x", "y", "radius", "start_angle", "end_angle"])
                 for s in self.sectors:
-                    writer.writerow([s.x, s.y, s.radius, s.start_angle, s.end_angle, s.color])
+                    writer.writerow(s.to_csv_row())
             self.status.config(text=f"Сохранено в {os.path.basename(filename)}")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}")
@@ -175,10 +160,10 @@ class App:
         arc_points = sector.get_arc_points()
         if not arc_points:
             return
-        pivot = arc_points[0]  # первая точка дуги
+        pivot = arc_points[0]  # первая граничная точка дуги
         sector.rotate(pivot, 30)  # поворот на 30 градусов
         self.redraw()
-        self.status.config(text="Последний сектор повёрнут на 30° вокруг первой точки дуги")
+        self.status.config(text="Последний сектор повёрнут на 30° вокруг первой граничной точки")
 
     def redraw(self):
         self.canvas.delete("all")
