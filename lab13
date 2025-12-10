@@ -1,0 +1,291 @@
+import tkinter as tk
+from collections import deque
+import random
+import math
+import time
+import tkinter.messagebox
+
+
+class MazeGame:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.title("Паучок в лабиринте")
+        self.root.resizable(False, False)
+
+        # Размер лабиринта
+        self.rows = 15
+        self.cols = 15
+        self.cell_size = 30
+
+        # Создание canvas
+        self.canvas = tk.Canvas(
+            self.root,
+            width=self.cols * self.cell_size,
+            height=self.rows * self.cell_size,
+            bg='white'
+        )
+        self.canvas.pack()
+        # Добавление обработки кликов для смены стартовой точки
+        self.canvas.bind("<Button-1>", self.set_start_point)
+
+        # Создание кнопок и метки времени
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(pady=10)
+
+        tk.Button(button_frame, text="Создать лабиринт", command=self.generate_maze).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Найти путь", command=self.find_path).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Очистить", command=self.clear_path).pack(side=tk.LEFT, padx=5)
+
+        # Метка для отображения времени
+        self.time_label = tk.Label(self.root, text="Время: 0.00 сек", font=("Arial", 12))
+        self.time_label.pack(pady=5)
+
+        # Инициализация лабиринта
+        self.maze = []
+        self.start = (0, 0)
+        self.end = (self.rows - 1, self.cols - 1)
+        self.path = []
+        self.spider_animation = None
+        self.animation_counter = 0  # Счетчик для анимации
+        self.search_path = []  # Путь поиска для анимации
+        self.visited_cells = set()  # Посещенные ячейки для анимации
+        self.start_time = 0  # Время начала поиска
+
+        self.generate_maze()
+
+    def set_start_point(self, event):
+        """Установка новой стартовой точки"""
+        col = event.x // self.cell_size
+        row = event.y // self.cell_size
+
+        if 0 <= row < self.rows and 0 <= col < self.cols and self.maze[row][col] == 0:
+            self.start = (row, col)
+            self.clear_path()
+            self.draw_maze()
+
+    def generate_maze(self):
+        """Генерация более сложного лабиринта"""
+        # Сохраняем текущую стартовую точку перед генерацией
+        current_start = self.start
+
+        # Инициализация лабиринта полностью заполненного стенами
+        self.maze = [[1 for _ in range(self.cols)] for _ in range(self.rows)]
+
+        # Используем фиксированную стартовую точку для генерации (0, 0)
+        # чтобы лабиринт всегда генерировался одинаково
+        generation_start = (0, 0)
+        stack = [generation_start]
+        self.maze[generation_start[0]][generation_start[1]] = 0
+
+        directions = [(0, 2), (2, 0), (0, -2), (-2, 0)]
+
+        while stack:
+            current = stack[-1]
+            row, col = current
+
+            # Получаем возможные направления
+            neighbors = []
+            for dr, dc in directions:
+                r, c = row + dr, col + dc
+                if 0 <= r < self.rows and 0 <= c < self.cols and self.maze[r][c] == 1:
+                    # Проверяем, что вокруг нет других проходов (кроме текущего пути)
+                    count = 0
+                    for dr2, dc2 in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                        r2, c2 = r + dr2, c + dc2
+                        if 0 <= r2 < self.rows and 0 <= c2 < self.cols and self.maze[r2][c2] == 0:
+                            count += 1
+                    if count <= 1:  # Разрешаем только один соседний проход
+                        neighbors.append((dr, dc))
+
+            if neighbors:
+                # Выбираем случайное направление
+                dr, dc = random.choice(neighbors)
+                # Убираем стену между текущей клеткой и следующей
+                self.maze[row + dr // 2][col + dc // 2] = 0
+                # Делаем следующую клетку проходом
+                self.maze[row + dr][col + dc] = 0
+                # Добавляем в стек
+                stack.append((row + dr, col + dc))
+            else:
+                # Возвращаемся назад
+                stack.pop()
+
+        # Гарантируем, что текущая стартовая точка и финиш проходимы
+        self.maze[current_start[0]][current_start[1]] = 0
+        self.maze[self.end[0]][self.end[1]] = 0
+
+        # Добавляем дополнительные случайные проходы для усложнения
+        for _ in range(self.rows * self.cols // 10):
+            i = random.randint(1, self.rows - 2)
+            j = random.randint(1, self.cols - 2)
+            if self.maze[i][j] == 1:
+                # Проверяем, что превращение стены в проход не создает изолированную область
+                wall_count = 0
+                for di, dj in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                    if self.maze[i + di][j + dj] == 1:
+                        wall_count += 1
+                if wall_count >= 3:  # Превращаем в проход только если это не создаст большую пустоту
+                    self.maze[i][j] = 0
+
+        self.draw_maze()
+
+    def draw_maze(self):
+        """Отрисовка лабиринта"""
+        self.canvas.delete("all")
+
+        for i in range(self.rows):
+            for j in range(self.cols):
+                x1 = j * self.cell_size
+                y1 = i * self.cell_size
+                x2 = x1 + self.cell_size
+                y2 = y1 + self.cell_size
+
+                if self.maze[i][j] == 1:  # Стена
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill='#2c3e50', outline='#34495e')
+                else:  # Проход
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill='#ecf0f1', outline='#bdc3c7')
+
+                # Отметка старта
+                if (i, j) == self.start:
+                    self.canvas.create_oval(x1 + 5, y1 + 5, x2 - 5, y2 - 5, fill='#2ecc71', tags="spider")
+                    # Рисуем паучка
+                    self.draw_spider(x1 + self.cell_size // 2, y1 + self.cell_size // 2)
+
+                # Отметка финиша
+                if (i, j) == self.end:
+                    self.canvas.create_rectangle(x1 + 5, y1 + 5, x2 - 5, y2 - 5, fill='#e74c3c')
+
+    def draw_spider(self, x, y):
+        """Рисует паучка в указанной позиции"""
+        # Тело паучка
+        self.canvas.create_oval(x - 8, y - 8, x + 8, y + 8, fill='#2c3e50', tags="spider")
+
+        # Глаза
+        self.canvas.create_oval(x - 3, y - 4, x - 1, y - 2, fill='#e74c3c', tags="spider")
+        self.canvas.create_oval(x + 1, y - 4, x + 3, y - 2, fill='#e74c3c', tags="spider")
+
+        # Лапки (8 лапок)
+        leg_coords = [
+            (x - 5, y - 5, x - 15, y - 10), (x + 5, y - 5, x + 15, y - 10),
+            (x - 8, y, x - 18, y), (x + 8, y, x + 18, y),
+            (x - 8, y + 5, x - 18, y + 10), (x + 8, y + 5, x + 18, y + 10),
+            (x - 5, y + 8, x - 12, y + 15), (x + 5, y + 8, x + 12, y + 15)
+        ]
+
+        for x1, y1, x2, y2 in leg_coords:
+            self.canvas.create_line(x1, y1, x2, y2, width=2, fill='#2c3e50', tags="spider")
+
+    def find_path(self):
+        """Поиск пути с помощью BFS с анимацией"""
+        # Очищаем предыдущий путь
+        self.clear_path()
+
+        # Запускаем таймер
+        self.start_time = time.time()
+
+        # BFS алгоритм с анимацией
+        self.visited_cells = set([self.start])
+        self.search_path = [self.start]
+        self.visited_parents = {}
+
+        # Запускаем анимацию поиска
+        self.animate_search()
+
+    def animate_search(self):
+        """Анимация процесса поиска пути"""
+        if not self.search_path:
+            # Поиск завершен, выводим результат
+            elapsed_time = time.time() - self.start_time
+            self.time_label.config(text=f"Время: {elapsed_time:.2f} сек")
+
+            if self.end in self.visited_parents:
+                # Восстанавливаем путь
+                path = []
+                current = self.end
+                while current != self.start:
+                    path.append(current)
+                    current = self.visited_parents[current]
+                path.reverse()
+                self.path = path
+
+                # Отрисовываем финальный путь
+                self.draw_final_path()
+            else:
+                tk.messagebox.showinfo("Информация", "Путь не найден!")
+            return
+
+        # Берем следующую клетку для обработки
+        current = self.search_path.pop(0)
+
+        # Обновляем позицию паучка
+        self.canvas.delete("spider")
+        row, col = current
+        x_center = col * self.cell_size + self.cell_size // 2
+        y_center = row * self.cell_size + self.cell_size // 2
+        self.draw_spider(x_center, y_center)
+
+        # Обновляем время
+        elapsed_time = time.time() - self.start_time
+        self.time_label.config(text=f"Время: {elapsed_time:.2f} сек")
+
+        # Если достигли финиша, завершаем поиск
+        if current == self.end:
+            self.search_path = []  # Останавливаем поиск
+            self.spider_animation = self.root.after(50, self.animate_search)  # Завершаем анимацию
+            return
+
+        # Продолжаем поиск
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+        for dx, dy in directions:
+            next_row, next_col = current[0] + dx, current[1] + dy
+            neighbor = (next_row, next_col)
+
+            if (0 <= next_row < self.rows and 0 <= next_col < self.cols and
+                    self.maze[next_row][next_col] == 0 and neighbor not in self.visited_cells):
+                self.search_path.append(neighbor)
+                self.visited_cells.add(neighbor)
+                self.visited_parents[neighbor] = current
+
+        # Продолжаем анимацию
+        self.spider_animation = self.root.after(50, self.animate_search)
+
+    def draw_final_path(self):
+        """Отрисовка найденного пути"""
+        for i, (row, col) in enumerate(self.path):
+            x1 = col * self.cell_size + 2
+            y1 = row * self.cell_size + 2
+            x2 = x1 + self.cell_size - 4
+            y2 = y1 + self.cell_size - 4
+
+            # Рисуем путь синим цветом
+            self.canvas.create_oval(x1, y1, x2, y2, fill='#3498db', outline='#2980b9', tags="path")
+
+    def clear_path(self):
+        """Очищает найденный путь"""
+        self.canvas.delete("path")
+        self.path = []
+
+        # Останавливаем анимацию
+        if self.spider_animation:
+            self.root.after_cancel(self.spider_animation)
+            self.spider_animation = None
+
+        # Сбрасываем время
+        self.time_label.config(text="Время: 0.00 сек")
+
+        # Возвращаем паучка на старт
+        self.canvas.delete("spider")
+        row, col = self.start
+        x_center = col * self.cell_size + self.cell_size // 2
+        y_center = row * self.cell_size + self.cell_size // 2
+        self.draw_spider(x_center, y_center)
+
+    def run(self):
+        """Запуск приложения"""
+        self.root.mainloop()
+
+
+# Запуск игры
+if __name__ == "__main__":
+    game = MazeGame()
+    game.run()
